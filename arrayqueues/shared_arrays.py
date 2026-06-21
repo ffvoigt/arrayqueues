@@ -14,11 +14,11 @@ class ArrayView:
     def __init__(self, array, max_bytes, dtype, el_shape, i_item=0):
         self.dtype = dtype
         self.el_shape = el_shape
-        self.nbytes_el = self.dtype.itemsize * np.product(self.el_shape)
+        self.nbytes_el = self.dtype.itemsize * np.product(self.el_shape, dtype=np.int64)
         self.n_items = int(np.floor(max_bytes / self.nbytes_el))
         self.total_shape = (self.n_items,) + self.el_shape
         self.i_item = i_item
-        self.view = np.frombuffer(array, dtype, np.product(self.total_shape)).reshape(
+        self.view = np.frombuffer(array, dtype, np.product(self.total_shape, dtype=np.int64)).reshape(
             self.total_shape
         )
 
@@ -63,13 +63,17 @@ class ArrayQueue:
         self.read_queue = PortableQueue()
         self.last_item = 0
 
-    def check_full(self):
+    def _is_full(self):
+        """Non-raising full check. Updates last_item from read_queue."""
         while True:
             try:
                 self.last_item = self.read_queue.get(timeout=0.00001)
             except Empty:
                 break
-        if self.view.i_item == self.last_item:
+        return self.view is not None and self.view.i_item == self.last_item
+
+    def check_full(self):
+        if self._is_full():
             raise Full(
                 "Queue of length {} full when trying to insert {},"
                 " last item read was {}".format(
@@ -88,6 +92,20 @@ class ArrayQueue:
         qitem = self.view.push(element)
 
         self.queue.put(qitem)
+
+    def try_put(self, element):
+        """Attempt to put element. Returns True on success, False if full."""
+        if self.view is None or not self.view.fits(element):
+            self.view = ArrayView(
+                self.array.get_obj(), self.maxbytes, element.dtype, element.shape
+            )
+            self.last_item = 0
+        else:
+            if self._is_full():
+                return False
+        qitem = self.view.push(element)
+        self.queue.put(qitem)
+        return True
 
     def get(self, **kwargs):
         aritem = self.queue.get(**kwargs)
@@ -140,6 +158,23 @@ class TimestampedArrayQueue(ArrayQueue):
 
         self.queue.put((timestamp, qitem))
 
+    def try_put(self, element, timestamp=None):
+        """Attempt to put element. Returns True on success, False if full."""
+        if self.view is None or not self.view.fits(element):
+            self.view = ArrayView(
+                self.array.get_obj(), self.maxbytes, element.dtype, element.shape
+            )
+        else:
+            if self._is_full():
+                return False
+
+        qitem = self.view.push(element)
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        self.queue.put((timestamp, qitem))
+        return True
+
     def get(self, **kwargs):
         timestamp, aritem = self.queue.get(**kwargs)
         if self.view is None or not self.view.fits(aritem):
@@ -169,6 +204,24 @@ class IndexedArrayQueue(ArrayQueue):
 
         self.queue.put((timestamp, self.counter, qitem))
         self.counter += 1
+
+    def try_put(self, element, timestamp=None):
+        """Attempt to put element. Returns True on success, False if full."""
+        if self.view is None or not self.view.fits(element):
+            self.view = ArrayView(
+                self.array.get_obj(), self.maxbytes, element.dtype, element.shape
+            )
+        else:
+            if self._is_full():
+                return False
+
+        qitem = self.view.push(element)
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        self.queue.put((timestamp, self.counter, qitem))
+        self.counter += 1
+        return True
 
     def get(self, **kwargs):
         timestamp, index, aritem = self.queue.get(**kwargs)
