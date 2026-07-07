@@ -130,3 +130,13 @@ def test_clearing_queue():
     p1.source_array.clear()
     time.sleep(1.0)
     assert p1.source_array.empty()
+
+
+def test_get_last():
+    p1 = SourceProcess(10, n_mbytes=10)
+    p1.start()
+    p1.join()
+    result = p1.source_array.get_last(timeout=1.0)
+    assert result.shape == (100, 100)
+    assert result[0, 0] == 5
+    assert p1.source_array.empty()

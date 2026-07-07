@@ -114,6 +114,21 @@ class ArrayQueue:
         self.read_queue.put(aritem[2])
         return self.view.pop(aritem[2])
 
+    def get_last(self, **kwargs):
+        """Drain the queue and return only the most recent element."""
+        items = [self.queue.get(**kwargs)]
+        while True:
+            try:
+                items.append(self.queue.get_nowait())
+            except Empty:
+                break
+        last_aritem = items[-1]
+        if self.view is None or not self.view.fits(last_aritem):
+            self.view = ArrayView(self.array.get_obj(), self.maxbytes, *last_aritem)
+        for aritem in items:
+            self.read_queue.put(aritem[2])
+        return self.view.pop(last_aritem[2])
+
     def clear(self):
         """Empties the queue without the need to read all the existing
         elements
@@ -182,6 +197,21 @@ class TimestampedArrayQueue(ArrayQueue):
         self.read_queue.put(aritem[2])
         return timestamp, self.view.pop(aritem[2])
 
+    def get_last(self, **kwargs):
+        """Drain the queue and return only the most recent element."""
+        items = [self.queue.get(**kwargs)]
+        while True:
+            try:
+                items.append(self.queue.get_nowait())
+            except Empty:
+                break
+        last_timestamp, last_aritem = items[-1]
+        if self.view is None or not self.view.fits(last_aritem):
+            self.view = ArrayView(self.array.get_obj(), self.maxbytes, *last_aritem)
+        for _, aritem in items:
+            self.read_queue.put(aritem[2])
+        return last_timestamp, self.view.pop(last_aritem[2])
+
 
 class IndexedArrayQueue(ArrayQueue):
     """A small extension to support timestamps saved alongside arrays"""
@@ -229,3 +259,18 @@ class IndexedArrayQueue(ArrayQueue):
             self.view = ArrayView(self.array.get_obj(), self.maxbytes, *aritem)
         self.read_queue.put(aritem[2])
         return timestamp, index, self.view.pop(aritem[2])
+
+    def get_last(self, **kwargs):
+        """Drain the queue and return only the most recent element."""
+        items = [self.queue.get(**kwargs)]
+        while True:
+            try:
+                items.append(self.queue.get_nowait())
+            except Empty:
+                break
+        last_timestamp, last_index, last_aritem = items[-1]
+        if self.view is None or not self.view.fits(last_aritem):
+            self.view = ArrayView(self.array.get_obj(), self.maxbytes, *last_aritem)
+        for _, _, aritem in items:
+            self.read_queue.put(aritem[2])
+        return last_timestamp, last_index, self.view.pop(last_aritem[2])
